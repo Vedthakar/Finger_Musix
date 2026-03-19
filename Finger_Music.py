@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 import mediapipe as mp
 import math
+from pathlib import Path
 from imutils import resize
 import simpleaudio as sa
 
@@ -20,17 +21,39 @@ MODE_LOCK    = False       # prevents rapid mode flip‑flop while still pinched
 # ------------------------------
 # PRE‑LOAD SOUNDS (no disk I/O during loop)
 # ------------------------------
+BASE_DIR = Path(__file__).resolve().parent
+CANDIDATE_SOUND_DIRS = [
+    BASE_DIR / "Sounds",
+    BASE_DIR.parent / "Sounds",
+]
+
+
+def resolve_asset(filename, required=True):
+    for sound_dir in CANDIDATE_SOUND_DIRS:
+        asset_path = sound_dir / filename
+        if asset_path.exists():
+            return asset_path
+    if required:
+        searched = ", ".join(str(path) for path in CANDIDATE_SOUND_DIRS)
+        raise FileNotFoundError(f"Missing asset: {filename}. Searched: {searched}")
+    return None
+
+
+def load_sound(filename):
+    return sa.WaveObject.from_wave_file(str(resolve_asset(filename)))
+
+
 # Drum kit
-snare = sa.WaveObject.from_wave_file("673492__theendofacycle__edm-snare-drum.wav")
-kick  = sa.WaveObject.from_wave_file("91600__suicidity__dirty-tonys-kick-drum-mx-028.wav")
-base  = sa.WaveObject.from_wave_file("626147__jeremy123__dirt_base.wav")
-crash = sa.WaveObject.from_wave_file("45101__matiasreccius__crasha.wav")
+snare = load_sound("673492__theendofacycle__edm-snare-drum.wav")
+kick  = load_sound("91600__suicidity__dirty-tonys-kick-drum-mx-028.wav")
+base  = load_sound("626147__jeremy123__dirt_base.wav")
+crash = load_sound("45101__matiasreccius__crasha.wav")
 
 # Guitar notes
-guitar_g = sa.WaveObject.from_wave_file("Guitar_G.wav")
-guitar_a = sa.WaveObject.from_wave_file("Guitar_A.wav")
-guitar_d = sa.WaveObject.from_wave_file("Guitar_D.wav")
-guitar_b = sa.WaveObject.from_wave_file("Guitar_B.wav")
+guitar_g = load_sound("Guitar_G.wav")
+guitar_a = load_sound("Guitar_A.wav")
+guitar_d = load_sound("Guitar_D.wav")
+guitar_b = load_sound("Guitar_B.wav")
 
 play = lambda w: w.play()            # fire‑and‑forget helper
 
@@ -53,18 +76,21 @@ vid.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 # ------------------------------
 # 20‑px overlay icon (purely decorative)
 # ------------------------------
-OVERLAY_PATH = "8-80320_snare-drumhead-hd-png-download.png"
-raw = cv2.imread(OVERLAY_PATH, cv2.IMREAD_UNCHANGED)
-if raw is None:
-    raise FileNotFoundError(f"Missing overlay: {OVERLAY_PATH}")
-raw = resize(raw, width=20)
-if raw.shape[2] == 4:
-    overlay_bgr, overlay_mask = raw[..., :3], raw[..., 3]
-else:
-    overlay_bgr = raw
-    g = cv2.cvtColor(overlay_bgr, cv2.COLOR_BGR2GRAY)
-    _, overlay_mask = cv2.threshold(g, 1, 255, cv2.THRESH_BINARY)
-ov_h, ov_w = overlay_mask.shape
+OVERLAY_PATH = resolve_asset("8-80320_snare-drumhead-hd-png-download.png", required=False)
+overlay_bgr = None
+overlay_mask = None
+ov_h = ov_w = 0
+if OVERLAY_PATH is not None:
+    raw = cv2.imread(str(OVERLAY_PATH), cv2.IMREAD_UNCHANGED)
+    if raw is not None:
+        raw = resize(raw, width=20)
+        if raw.shape[2] == 4:
+            overlay_bgr, overlay_mask = raw[..., :3], raw[..., 3]
+        else:
+            overlay_bgr = raw
+            g = cv2.cvtColor(overlay_bgr, cv2.COLOR_BGR2GRAY)
+            _, overlay_mask = cv2.threshold(g, 1, 255, cv2.THRESH_BINARY)
+        ov_h, ov_w = overlay_mask.shape
 x_off, y_off = 10, 10
 
 # ------------------------------
@@ -87,8 +113,9 @@ while True:
     frame_idx += 1
 
     # ---------- draw overlay icon ----------
-    roi = frame[y_off:y_off + ov_h, x_off:x_off + ov_w]
-    cv2.copyTo(overlay_bgr, overlay_mask, roi)
+    if overlay_bgr is not None and overlay_mask is not None:
+        roi = frame[y_off:y_off + ov_h, x_off:x_off + ov_w]
+        cv2.copyTo(overlay_bgr, overlay_mask, roi)
 
     # ---------- extract landmarks ----------
     pts = []
